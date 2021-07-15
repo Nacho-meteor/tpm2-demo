@@ -90,6 +90,9 @@ tcti_teardown(TSS2_TCTI_CONTEXT * tcti_context)
 int
 test_esys_get_random(ESYS_CONTEXT * esys_context);
 
+int
+test_esys_nv_ram_ordinary_index(ESYS_CONTEXT * esys_context);
+
 #ifdef __cplusplus
 }
 #endif

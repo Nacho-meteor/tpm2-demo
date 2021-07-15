@@ -144,7 +144,23 @@ tcti_proxy_initialize(
 
 int
 test_invoke_esapi(ESYS_CONTEXT * esys_context) {
-    return test_esys_get_random(esys_context);
+    int ret;
+
+    ret = test_esys_get_random(esys_context);
+    if (ret == EXIT_SUCCESS){
+        printf("Esys get random successful!!\n");
+    }else{
+        goto end;
+    }
+
+    ret = test_esys_nv_ram_ordinary_index(esys_context);
+    if (ret == EXIT_SUCCESS){
+        printf("Esys nvram write and read successful!!\n");
+    }else{
+        goto end;
+    }
+end:      
+    return ret;
 }
 
 int
@@ -205,8 +221,8 @@ main(int argc, char *argv[]){
     }
 
     ret = test_invoke_esapi(esys_context);
-    if (ret == EXIT_SUCCESS)
-        printf("TPM GetRandom Successful !!!\n");
+    if (ret != EXIT_SUCCESS)
+        LOG_ERROR("Test invoke esapi failed");
 
     Esys_Finalize(&esys_context);
     tcti_teardown(tcti_context);
@@ -281,5 +297,118 @@ test_esys_get_random(ESYS_CONTEXT * esys_context)
         LOG_ERROR("FlushContext FAILED! Response Code : 0x%x", r);
     }
  error:
+    return EXIT_FAILURE;
+}
+
+
+int
+test_esys_nv_ram_ordinary_index(ESYS_CONTEXT * esys_context)
+{
+    TSS2_RC r;
+    ESYS_TR nvHandle = ESYS_TR_NONE;
+
+    TPM2B_AUTH auth = {
+        .size = 20,
+        .buffer = {
+            10, 11, 12, 13, 14, 15, 16, 17, 18, 19,
+            20, 21, 22, 23, 24, 25, 26, 27, 28, 29
+        }
+    };
+
+    TPM2B_NV_PUBLIC publicInfo = {
+        .size = 0,
+        .nvPublic = {
+            .nvIndex = TPM2_NV_INDEX_FIRST,
+            .nameAlg = TPM2_ALG_SHA1,
+            .attributes = (
+                TPMA_NV_OWNERWRITE |
+                TPMA_NV_AUTHWRITE |
+                TPMA_NV_WRITE_STCLEAR |
+                TPMA_NV_READ_STCLEAR |
+                TPMA_NV_AUTHREAD |
+                TPMA_NV_OWNERREAD
+                ),
+            .authPolicy = {
+                .size = 0,
+                .buffer = {},
+            },
+            .dataSize = 32,
+        }
+    };
+
+    r = Esys_NV_DefineSpace(esys_context,
+                            ESYS_TR_RH_OWNER, //Auth handle
+                            ESYS_TR_PASSWORD, //auth handle session
+                            ESYS_TR_NONE,     //optional session
+                            ESYS_TR_NONE,
+                            &auth,
+                            &publicInfo,
+                            &nvHandle);
+    if (r != TSS2_RC_SUCCESS){
+        LOG_ERROR("Error esys define nv space:0x%x", r);
+        goto error;
+    }
+
+    UINT16 offset = 0;
+    TPM2B_MAX_NV_BUFFER nv_test_data = { .size = 20,
+                                         .buffer={0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 0,
+                                                  1, 2, 3, 4, 5, 6, 7, 8, 9}};
+                                                
+    TPM2B_NV_PUBLIC *nvPublic;
+    TPM2B_NAME *nvName;
+
+    r = Esys_NV_Write(esys_context,
+                        nvHandle,
+                        nvHandle,
+                        ESYS_TR_PASSWORD,
+                        ESYS_TR_NONE,
+                        ESYS_TR_NONE,
+                        &nv_test_data,
+                        offset);
+    if (r != TSS2_RC_SUCCESS){
+        LOG_ERROR("Error esys nv write:0x%x", r);
+        goto error;
+    }
+
+    TPM2B_MAX_NV_BUFFER *nv_test_data2;
+
+    r = Esys_NV_Read(esys_context,
+                        nvHandle,
+                        nvHandle,
+                        ESYS_TR_PASSWORD,
+                        ESYS_TR_NONE,
+                        ESYS_TR_NONE,
+                        20,
+                        0,
+                        &nv_test_data2);
+    if (r != TSS2_RC_SUCCESS){
+        LOG_ERROR("Error esys nv read:0x%x", r);
+        goto error;
+    }
+
+    r = Esys_NV_UndefineSpace(esys_context,
+                                ESYS_TR_RH_OWNER,
+                                nvHandle,
+                                ESYS_TR_PASSWORD,
+                                ESYS_TR_NONE,
+                                ESYS_TR_NONE);
+    if (r != TSS2_RC_SUCCESS){
+        LOG_ERROR("Error esys undefine nv space:0x%x", r);
+        goto error;       
+    }
+    return EXIT_SUCCESS;
+
+error:
+    if (nvHandle != ESYS_TR_NONE) {
+        if (Esys_NV_UndefineSpace(esys_context,
+                                    ESYS_TR_RH_OWNER,
+                                    nvHandle,
+                                    ESYS_TR_PASSWORD,
+                                    ESYS_TR_NONE,
+                                    ESYS_TR_NONE) != TSS2_RC_SUCCESS) {
+            LOG_ERROR("Cleanup nvHandle failed.");
+        }
+    }
+
     return EXIT_FAILURE;
 }
